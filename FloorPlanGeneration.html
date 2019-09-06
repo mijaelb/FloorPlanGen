@@ -1,0 +1,82 @@
+<meta name="description" content="">
+<meta name="theme-color" content="#323232">
+<script src="//cdnjs.cloudflare.com/ajax/libs/dat-gui/0.5/dat.gui.min.js"></script>
+<div class="form">
+    <div class="block">
+        <button class="button button_primary" type="button" id="pause">Pause</button>
+        <button type="button" class="button button_primary"  id="return">Return to Best</button>
+        <button class="button button_secondary"  type="button" id="save">Save Data</button>
+        <input type="file" class="button button_primary" id="load" name="file" />
+        <button type="button" class="button" id="restart_grid">Restart Grid</button>
+        <button type="button" class="button"  id="restart_all">Restart All</button>
+    </div>
+
+</div>
+
+body,
+html {
+margin: 0;
+padding: 0;
+overflow: hidden;
+background-color: #212121;
+}
+
+canvas {
+border: none;
+padding: 0;
+margin: 0;
+}
+
+.form {
+text-align: left;
+background-color: #212121;
+color: #FFFFFF;
+}
+
+.button {
+display: inline-block;
+margin: 0;
+padding: 0.3rem 0.5rem;
+border: 0;
+border-radius: 0.317rem;
+background-color: #aaa;
+color: #fff;
+text-decoration: none;
+font-weight: 700;
+font-size: 0.7rem;
+line-height: 1.5;
+font-family: "Helvetica Neue", Arial, sans-serif;
+cursor: pointer;
+-webkit-appearance: none;
+-webkit-font-smoothing: antialiased;
+}
+
+.button:hover {
+opacity: 0.85;
+}
+
+.button:active {
+box-shadow: inset 0 3px 4px hsla(0, 0%, 0%, 0.2);
+}
+
+.button:focus {
+outline: thin dotted #444;
+outline: 5px auto -webkit-focus-ring-color;
+outline-offset: -2px;
+}
+
+.button_primary {
+background-color: #1fa3ec;
+}
+
+.button_secondary {
+background-color: #e98724;
+}
+
+.button-icon {
+display: inline-block;
+position: relative;
+top: -0.1em;
+vertical-align: middle;
+margin-right: 0.317rem;
+}
