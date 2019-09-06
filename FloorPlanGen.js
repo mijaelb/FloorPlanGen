@@ -41,6 +41,7 @@ const grid = {
     access_cost: 0,
     dimensions_cost: 0,
     shape_cost: 0,
+    distance_cost: 0,
     best_cost: 0,
     cells: [],
     matrix: [],
@@ -113,6 +114,7 @@ var KD = 1;
 var KS = 1;
 var KR = 1;
 var KO = 1;
+var KT = 1;
 var SPLIT_VERTICES_PROB = 0.5;
 var SPLIT_ANY_PROB = 0.9;
 var PROPOSAL_MOVE_PROB = 0.5;
@@ -200,7 +202,8 @@ const controls = {
     kd: KD,
     ks: KS,
     kr: KR,
-    ko: KO
+    ko: KO,
+    kt: KT
 };
 guiSetup();
 
@@ -215,11 +218,12 @@ function guiSetup(){
     gui.add(controls, 'beta_start').min(0.1).max(2).step(0.1).onChange(function(value){BETA_START = value;});
     gui.add(controls, 'beta_limit').min(0.1).max(2).step(0.1).onChange(function(value){BETA_LIMIT = value;});
     gui.add(controls, 'door_size').min(2).max(6).step(1).onChange(function(value){DOOR_SIZE = value; });
-    gui.add(controls, 'ka').min(0.01).max(10).onChange(function(value){KA = value;});
-    gui.add(controls, 'kd').min(0.01).max(10).onChange(function(value){KD = value;});
-    gui.add(controls, 'ks').min(0.01).max(10).onChange(function(value){KS = value;});
-    gui.add(controls, 'kr').min(0.01).max(10).onChange(function(value){KR = value;});
-    gui.add(controls, 'ko').min(0.01).max(10).onChange(function(value){KO = value;});
+    gui.add(controls, 'ka').min(0).max(10).onChange(function(value){KA = value;});
+    gui.add(controls, 'kd').min(0).max(10).onChange(function(value){KD = value;});
+    gui.add(controls, 'ks').min(0).max(10).onChange(function(value){KS = value;});
+    gui.add(controls, 'kr').min(0).max(10).onChange(function(value){KR = value;});
+    gui.add(controls, 'ko').min(0).max(10).onChange(function(value){KO = value;});
+    gui.add(controls, 'kt').min(0).max(10).onChange(function(value){KT = value;});
 }
 
 /**
@@ -237,6 +241,7 @@ function updateControls(){
     controls.ks = KS;
     controls.kr = KR;
     controls.ko = KO;
+    controls.kt = KT;
     var elem = document.getElementById('pause');
     elem.innerHTML = grid.paused ? "Continue" : "Pause";
 }
@@ -608,7 +613,7 @@ function updateGraphLabels(_graph) {
  */
 app.ticker.add(function update(delta) {
     if(grid.paused) start();
-    if(grid.ticks % 1 == 0) {
+    if(grid.ticks % 10 == 0) {
         grid.elapsed_time += end()/1000;
         drawGrid(graph, grid);
         printOutput();
@@ -664,6 +669,7 @@ function createGridFromData(data, _graph, _grid, _viewport){
     _grid.access_cost = data.grid_access_cost;
     _grid.dimensions_cost = data.grid_dimensions_cost;
     _grid.shape_cost = data.grid_shape_cost;
+    _grid.distance_cost = data.grid_distance_cost;
     _grid.best_cost = data.grid_best_cost;
     _grid.matrix = data.grid_matrix;
     _grid.best_matrix = data.grid_best_matrix;
@@ -987,7 +993,7 @@ function initFloorPlan(_graph, _grid){
     var dimensions = getAverageSquareDimensions(_graph.areas);
     // Create Squares
     for (var i = 0; i < _graph.nodes; i++)
-        setRectInGrid(i, Math.round(_grid.columns/2 - dimensions.width*_graph.columns/2) + _graph.positions[i][0] * dimensions.width, Math.round(_grid.rows/2 - dimensions.height*_graph.rows/2) +  _graph.positions[i][1] * dimensions.height, dimensions.width, dimensions.height, _grid);
+        setRectInGrid(i, Math.round(_grid.columns / 2 - dimensions.width * _graph.columns / 2) + _graph.positions[i][0] * dimensions.width, Math.round(_grid.rows / 2 - dimensions.height * _graph.rows / 2) + _graph.positions[i][1] * dimensions.height, dimensions.innerWidth, dimensions.innerHeight, _grid);
 
     updateGrid(_grid);
     updateCost(_graph,_grid);
@@ -1016,20 +1022,23 @@ function updateFloorPlan(_graph, _grid){
         last_access_cost = _grid.access_cost;
         last_dimensions_cost = _grid.dimensions_cost;
         last_shape_cost = _grid.shape_cost;
+        last_distance_cost = _grid.distance_cost;
 
         // Do a proposal move and update the cost of the layout
-        doProposalMove(_graph, _grid);
-        updateCost(_graph, _grid);
-        new_cost = _grid.cost;
+        doValidProposalMove(_graph, _grid);
 
-        // Accept or reject the new proposed layout with a certain probability
-        var prob = Math.min(1, Math.exp(BETA * (last_cost - new_cost)));
-        if(!checkFloorPlanAnomalies(_graph, _grid) || MathRandom() > prob){
+        // Update cost of the grid
+        updateCost(_graph, _grid);
+
+        // Accept or reject the new proposed layout with a certain probability otherwise rollback
+        if (MathRandom() > Math.min(1, Math.exp(BETA * (last_cost - _grid.cost)))) {
             _grid.matrix = last_matrix;
             _grid.cost = last_cost;
             _grid.access_cost = last_access_cost;
             _grid.dimensions_cost = last_dimensions_cost;
             _grid.shape_cost = last_shape_cost;
+            _grid.distance_cost = last_distance_cost;
+            updateGrid(_grid);
         }
 
         // Store if it is the best cost
@@ -1040,7 +1049,6 @@ function updateFloorPlan(_graph, _grid){
             _grid.found_best_at_tick = _grid.ticks;
         }
 
-        updateGrid(_grid);
         _grid.ticks++;
         _grid.running = false;
         if(BETA < BETA_LIMIT) BETA += BETA_DELTA;
@@ -1076,10 +1084,13 @@ function updateCost(_graph, _grid){
     var Ca = getAccessibilityCost(_graph, _grid);
     var Cd = getDimensionsCost(_graph, _grid);
     var Cs = getShapeCost(_graph, _grid);
+    var Ct = getDistanceCost(_graph, _grid);
     _grid.access_cost = KA*Ca;
     _grid.dimensions_cost = KD*Cd;
     _grid.shape_cost = KS*Cs;
-    _grid.cost = _grid.access_cost + _grid.dimensions_cost + _grid.shape_cost;
+    _grid.distance_cost = KT*Ct;
+    _grid.cost = _grid.access_cost + _grid.dimensions_cost + _grid.shape_cost + _grid.distance_cost;
+    //_grid.cost = _grid.access_cost + _grid.dimensions_cost + _grid.shape_cost;
 }
 
 /**
@@ -1097,7 +1108,7 @@ function getAccessibilityCost(_graph, _grid){
         if(_graph.links[i].source != last_source) {
             walls = getWallsFromGrid(_graph.links[i].source, _grid);
             last_source = _graph.links[i].source;
-            if(_graph.types[_graph.links[i].source] > 0) {
+            if(_graph.types[_graph.links[i].source] == 1) {
                 links_length++;
                 if (checkAccessInGrid(walls, -1, _grid))
                     access_count++;
@@ -1143,6 +1154,53 @@ function getShapeCost(_graph, _grid){
     return KR * cost_r + KO * (getOutlineWalls(_grid).length - 4);
 }
 
+/**
+ *
+ */
+function getDistanceCost(_graph, _grid){
+    var cost_dist = 0;
+    var last_source = -1;
+    var walls = [];
+    // Check adjacency
+    for(var i = 0; i < _graph.links.length; i++){
+        if(_graph.links[i].source != last_source) {
+            walls = getWallsFromGrid(_graph.links[i].source, _grid);
+            last_source = _graph.links[i].source;
+        }
+        var walls_ = getWallsFromGrid(_graph.links[i].target, _grid);
+        cost_dist += getMinimumDistanceBetweenWalls(walls, walls_) - 1;
+    }
+    return cost_dist;
+}
+
+
+function getMinimumDistanceBetweenWalls(walls, walls_) {
+    var dist = -1;
+    for(var i = 0; i < walls.length; i++)
+        for(var j = 0; j < walls_.length; j++) {
+            var new_dist = getMinimumDistanceBetweenWallAndWall(walls[i], walls_[j]);
+            if (dist == -1)
+                dist = new_dist;
+            else if (new_dist < dist)
+                dist = new_dist;
+        }
+
+    return dist;
+
+}
+
+function getMinimumDistanceBetweenWallAndWall(wall, wall_){
+    var dist = -1;
+    for(var i = 0; i < wall.cells.length; i++)
+        for(var j = 0; j < wall_.cells.length; j++) {
+            var new_dist = Math.sqrt(Math.pow(wall.cells[i].column - wall_.cells[j].column, 2) + Math.pow(wall.cells[i].row - wall_.cells[j].row, 2));
+            if (dist == -1)
+                dist = new_dist;
+            else if (new_dist < dist)
+                dist = new_dist;
+        }
+    return dist;
+}
 /**
  * @param value
  * @param _grid
@@ -1355,7 +1413,7 @@ function getIndicesOf(value, _grid){
 function getAverageSquareDimensions(areas){
     var average = getAverage(areas);
     var side = Math.round(Math.sqrt(average));
-    return { width: side, height: side };
+    return { width: side, height: side, innerWidth: side, innerHeight: side};
 }
 
 /**
@@ -1501,6 +1559,40 @@ function splitCollinearWall(wall){
 }
 
 /**
+ * @param room
+ * @param _grid
+ */
+function moveRooms(_graph, _grid){
+    var delta = Math.round(MathRandom()*(LIMIT-1)+1);
+    var direction = directions[Math.floor(MathRandom()*directions.length)];
+    var indices = getIndicesOf(Math.floor(MathRandom()*_graph.nodes), _grid);
+    for(var i = 0; i < indices.length; i++)
+        if(!moveCell(indices[i][0], indices[i][1], delta, direction, _grid))
+            return false;
+
+    updateGrid(_grid);
+    return true;
+}
+
+/**
+ * @param column
+ * @param row
+ * @param delta
+ * @param direction
+ * @param _grid
+ * @returns {boolean}
+ */
+function moveCell(column, row, delta, direction, _grid){
+    var new_column = column + direction[0]*delta;
+    var new_row = row + direction[1]*delta;
+    if(!setCell(new_column, new_row, _grid.matrix[column][row], _grid))
+        return false;
+
+    setCell(column, row, -1, _grid);
+    return true;
+}
+
+/**
  * @param {object} walls: An structure that holds information of direction and the array of indices of the walls to slide
  * @param {integer} delta: The distance to slide the walls
  * @param {boolean} forward: True if the slide is forward or False if it is backward
@@ -1508,8 +1600,11 @@ function splitCollinearWall(wall){
  */
 function slideWall(wall, delta, forward, _grid) {
     for(var i = 0; i < wall.cells.length; i++)
-        slideCell(wall.cells[i], delta, wall.direction, forward, _grid);
+        if(!slideCell(wall.cells[i], delta, wall.direction, forward, _grid))
+            return false;
+
     updateGrid(_grid);
+    return true;
 }
 
 /**
@@ -1531,8 +1626,10 @@ function slideCell(cell, delta, direction, forward, _grid){
         if(setCell(dx, dy, value, _grid)) {
             cell.column = forward ? dx: (dx + direction[0]);
             cell.row = forward ? dy: (dy + direction[1]);
-        }
+        } else
+            return false;
     }
+    return true;
 }
 
 /**
@@ -1608,20 +1705,37 @@ function swapRooms(_graph, _grid){
     }
     _grid.matrix = matrix;
     updateGrid(_grid);
+    return true;
 }
 
 /**
  * @param _graph
  * @param _grid
  */
-function doProposalMove(_graph, _grid){
-    if(MathRandom() > PROPOSAL_MOVE_PROB){
-        var randomWall = _grid.walls[Math.floor(MathRandom()*_grid.walls.length)];
-        var randomSplittedWall = splitCollinearWall(randomWall);
-        slideWall(randomSplittedWall, Math.round(MathRandom()*(LIMIT-1)+1), MathRandom()<0.5, _grid);
-        snapWall(randomSplittedWall, 1, _grid);
-    } else {
-        swapRooms(_graph, _grid);
+function doValidProposalMove(_graph, _grid) {
+    var success = false;
+    while(!success) {
+        var copy = duplicateMatrix(_grid.matrix);
+        if (MathRandom() > PROPOSAL_MOVE_PROB) {
+            var randomWall = _grid.walls[Math.floor(MathRandom() * _grid.walls.length)];
+            var randomSplittedWall = splitCollinearWall(randomWall);
+            success = slideWall(randomSplittedWall, Math.round(MathRandom() * (LIMIT - 1) + 1), MathRandom() < 0.5, _grid);
+            //if(success) snapWall(randomSplittedWall, 1, _grid);
+        } else
+            success = swapRooms(_graph, _grid);
+
+        if(success && !checkFloorPlanAnomalies(_graph, _grid))
+            success = false;
+
+        if(!success) {
+            _grid.matrix = copy;
+            updateGrid(_grid);
+        }
+
+        /*
+        else if (MathRandom() > PROPOSAL_MOVE_PROB && KT != 0) {
+            success = moveRooms(_graph, _grid);
+         */
     }
 }
 
@@ -1749,6 +1863,7 @@ function printOutput(){
         "Access Cost: " + grid.access_cost.toFixed(2) + "\n" +
         "Dimensions Cost: " + grid.dimensions_cost.toFixed(2) + "\n" +
         "Shape Cost: " + grid.shape_cost.toFixed(2) + "\n" +
+        "Distance Cost: " + grid.distance_cost.toFixed(2) + "\n" +
         "Best Cost: "  + grid.best_cost.toFixed(2) + "\n" +
         "Best At Time: " + grid.found_best_at_time.toFixed(0) + "\n" +
         "Best At Tick: " + grid.found_best_at_tick.toFixed(0) + "\n" +
@@ -1878,6 +1993,7 @@ function saveData(filename, _graph, _grid){
         grid_access_cost: _grid.access_cost,
         grid_dimensions_cost: _grid.dimensions_cost,
         grid_shape_cost: _grid.shape_cost,
+        grid_distance_cost: _grid.distance_cost,
         grid_best_cost: _grid.best_cost,
         grid_matrix: _grid.matrix,
         grid_best_matrix: _grid.best_matrix,
@@ -1895,7 +2011,8 @@ function saveData(filename, _graph, _grid){
         controls_kd: KD,
         controls_ks: KS,
         controls_kr: KR,
-        controls_ko: KO
+        controls_ko: KO,
+        controls_kt: KT
     };
     var data = JSON.stringify(data_);
     download(filename, data);
@@ -1920,6 +2037,7 @@ function loadData(data, _viewport, _graph, _grid){
     KS = data.controls_ks;
     KR = data.controls_kr;
     KO = data.controls_ko;
+    KT = data.controls_kt;
 
     updateControls();
     for (var i in gui.__controllers) {
