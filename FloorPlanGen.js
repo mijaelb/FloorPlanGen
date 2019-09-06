@@ -608,7 +608,7 @@ function updateGraphLabels(_graph) {
  */
 app.ticker.add(function update(delta) {
     if(grid.paused) start();
-    if(grid.ticks % 10 == 0) {
+    if(grid.ticks % 1 == 0) {
         grid.elapsed_time += end()/1000;
         drawGrid(graph, grid);
         printOutput();
@@ -1404,11 +1404,11 @@ function getWallsFromGrid(value, _grid){
     var walls_ = [];
     for(var i = 0; i < _grid.walls.length; i++){
         var temp = {label: _grid.walls[i].label, direction: _grid.walls[i].direction, cells:[]};
-        for(var j = 0; j < _grid.walls[i].cells.length; j++){
+        for(var j = 0; j < _grid.walls[i].cells.length; j++)
             if(_grid.walls[i].cells[j].value == value)
                 temp.cells.push(_grid.walls[i].cells[j]);
-        }
-        if(temp.cells.length != 0)
+
+        if(temp.cells.length > 0)
             walls_.push(temp);
     }
 
@@ -1439,8 +1439,8 @@ function getCollinearWallsInDirection(dir, _grid, value){
     var _i = vertical ? _grid.columns: _grid.rows;
     var _j = vertical ? _grid.rows:_grid.columns;
     var currentWall;
-    for(var i = 0; i < _i; i++){
-        for(var j = 0; j < _j; j++){
+    for(var i = 0; i <= _i; i++){
+        for(var j = 0; j <= _j; j++){
             var cell = vertical ? getCellAt(i, j, _grid): getCellAt(j, i, _grid);
             var isValue = value != undefined && cell.value == value ? true: (value != undefined ? false: true);
             if(!isWall && cell.label.includes(dir) && isValue){
