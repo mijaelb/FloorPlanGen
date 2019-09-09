@@ -50,6 +50,7 @@ const grid = {
     labels_obj:[],
     names: [],
     walls: [],
+    all_walls: [],
     areas: [],
     ratios: [],
     container: undefined,
@@ -117,7 +118,8 @@ var KO = 1;
 var KT = 1;
 var SPLIT_VERTICES_PROB = 0.5;
 var SPLIT_ANY_PROB = 0.9;
-var PROPOSAL_MOVE_PROB = 0.5;
+var PROPOSAL_MOVE_PROB = 0.8;
+var ADDITIONAL_MOVE_PROB = 0.5;
 var NUMBER_OF_ROOMS = 12;
 
 // Initiatialize PIXI app!
@@ -218,12 +220,12 @@ function guiSetup(){
     gui.add(controls, 'beta_start').min(0.1).max(2).step(0.1).onChange(function(value){BETA_START = value;});
     gui.add(controls, 'beta_limit').min(0.1).max(2).step(0.1).onChange(function(value){BETA_LIMIT = value;});
     gui.add(controls, 'door_size').min(2).max(6).step(1).onChange(function(value){DOOR_SIZE = value; });
-    gui.add(controls, 'ka').min(0).max(10).onChange(function(value){KA = value;});
-    gui.add(controls, 'kd').min(0).max(10).onChange(function(value){KD = value;});
-    gui.add(controls, 'ks').min(0).max(10).onChange(function(value){KS = value;});
-    gui.add(controls, 'kr').min(0).max(10).onChange(function(value){KR = value;});
-    gui.add(controls, 'ko').min(0).max(10).onChange(function(value){KO = value;});
-    gui.add(controls, 'kt').min(0).max(10).onChange(function(value){KT = value;});
+    gui.add(controls, 'ka').min(0).max(10).onChange(function(value){KA = value; updateCost(graph, grid);});
+    gui.add(controls, 'kd').min(0).max(10).onChange(function(value){KD = value; updateCost(graph, grid);});
+    gui.add(controls, 'ks').min(0).max(10).onChange(function(value){KS = value; updateCost(graph, grid);});
+    gui.add(controls, 'kr').min(0).max(10).onChange(function(value){KR = value; updateCost(graph, grid);});
+    gui.add(controls, 'ko').min(0).max(10).onChange(function(value){KO = value; updateCost(graph, grid);});
+    gui.add(controls, 'kt').min(0).max(10).onChange(function(value){KT = value; updateCost(graph, grid);});
 }
 
 /**
@@ -449,9 +451,9 @@ function createLinks(_graph) {
         // Randomly select a link direction
         var select = [MathRandom() > 0.5, MathRandom() > 0.5, MathRandom() > 0.5, MathRandom() > 0.5];
         var dir = [(select[0] ? [-1, 1] : 0),
-                   (select[1] ? [0, 1] : 0),
-                   (select[2] ? [1, 1] : 0),
-                   (select[3] ? [1, 0] : 0)];
+            (select[1] ? [0, 1] : 0),
+            (select[2] ? [1, 1] : 0),
+            (select[3] ? [1, 0] : 0)];
 
         // Create random links to 4 directions
         //               (R)-E
@@ -659,10 +661,11 @@ function createGrid(x, y, columns, rows, cell_width, cell_height, _grid, _graph,
  * @param _viewport
  */
 function createGridFromData(data, _graph, _grid, _viewport){
-    _grid.x = data.grid_x;
-    _grid.y = data.grid_y;
-    _grid.columns = data.grid_columns;
-    _grid.rows = data.grid_rows;
+    _grid.x = _graph.columns*NODES_DISTANCE;
+    _grid.y = 0;
+    var dim = getAverageSquareDimensions(graph.areas);
+    _grid.columns = dim.width*_graph.columns*2;
+    _grid.rows = dim.height*_graph.rows*2;
     _grid.cell_width = data.grid_cell_width;
     _grid.cell_height = data.grid_cell_height;
     _grid.cost = data.grid_cost;
@@ -671,7 +674,10 @@ function createGridFromData(data, _graph, _grid, _viewport){
     _grid.shape_cost = data.grid_shape_cost;
     _grid.distance_cost = data.grid_distance_cost;
     _grid.best_cost = data.grid_best_cost;
-    _grid.matrix = data.grid_matrix;
+    if(_grid.columns != data.grid_columns || _grid.rows != data.grid_rows)
+        _grid.matrix = createGridMatrix(-1, _grid.columns, _grid.rows);
+    else
+        _grid.matrix = data.grid_matrix;
     _grid.best_matrix = data.grid_best_matrix;
     _grid.ticks = data.grid_ticks;
     _grid.elapsed_time = data.grid_elapsed_time;
@@ -941,6 +947,7 @@ function updateGridLabels(_grid) {
  */
 function updateGridWalls(_grid){
     _grid.walls = getCollinearWalls(_grid);
+    _grid.all_walls = getWalls(_grid);
 }
 
 /**
@@ -1004,6 +1011,7 @@ function initFloorPlan(_graph, _grid){
     _grid.elapsed_time = 0;
     _grid.found_best_at_time = 0;
     _grid.found_best_at_tick = 0;
+    //console.log(_grid.walls);
 }
 
 /**
@@ -1103,19 +1111,23 @@ function getAccessibilityCost(_graph, _grid){
     var last_source = -1;
     var walls = [];
     var links_length = _graph.links.length;
-    // Check adjacency
+    // Check adjacency with other rooms
     for(var i = 0; i < _graph.links.length; i++){
         if(_graph.links[i].source != last_source) {
             walls = getWallsFromGrid(_graph.links[i].source, _grid);
             last_source = _graph.links[i].source;
-            if(_graph.types[_graph.links[i].source] == 1) {
-                links_length++;
-                if (checkAccessInGrid(walls, -1, _grid))
-                    access_count++;
-            }
         }
         if(checkAccessInGrid(walls, _graph.links[i].target, _grid))
             access_count++;
+    }
+    // Check adjacency with outside
+    for(var i = 0; i < _graph.nodes; i++){
+        if(_graph.types[i] == 1) {
+            links_length++;
+            walls = getWallsFromGrid(i, _grid);
+            if (checkAccessInGrid(walls, -1, _grid))
+                access_count++;
+        }
     }
     return links_length - access_count;
 }
@@ -1323,9 +1335,10 @@ function checkAccessInGrid(walls, target, _grid){
  * @param _grid
  * @returns {boolean}
  */
-function checkLonelyRooms(walls, _grid){
-    var count = 0;
+function checkLonelyRoom(value, _grid){
+    var walls = getWallsFromGrid(i, _grid);
     for(var i = 0; i < walls.length; i++){
+        var count = 0;
         for(var j = 0; j < walls[i].cells.length; j++){
             var dx = walls[i].cells[j].column + walls[i].direction[0];
             var dy = walls[i].cells[j].row + walls[i].direction[1];
@@ -1346,8 +1359,7 @@ function checkLonelyRooms(walls, _grid){
  */
 function checkSplittedRooms(_graph, _grid){
     for(var i = 0; i < _graph.nodes; i++) {
-        var walls = getWallsFromGrid(i, _grid);
-        if(checkLonelyRooms(walls,_grid)) return false;
+        //if(checkLonelyRoom(i, _grid)) return false;
         if (!recursiveWalk(i, _grid)) return false;
     }
     return true;
@@ -1446,12 +1458,13 @@ function setRectInGrid(value, x, y, width, height, _grid) {
  * @param _grid
  * @returns {[]|Array}
  */
-function getWalls(value, _grid){
-    walls = [];
+function getWalls(_grid){
+    var walls = [];
     for(var i = 0; i < directionsLabels.length; i++)
-        walls = walls.concat(getCollinearWallsInDirection(directionsLabels[i], _grid, value));
+        walls = walls.concat(getWallsInDirection(directionsLabels[i], _grid, false));
     return walls;
 }
+
 
 /**
  * @param value
@@ -1480,41 +1493,52 @@ function getWallsFromGrid(value, _grid){
 function getCollinearWalls(_grid){
     walls = [];
     for(var i = 0; i < directionsLabels.length; i++)
-        walls = walls.concat(getCollinearWallsInDirection(directionsLabels[i], _grid));
+        walls = walls.concat(getWallsInDirection(directionsLabels[i], _grid, true));
     return walls;
 }
 
 /**
  * @param dir
  * @param _grid
+ * @param collinear
  * @param value
  * @returns {[]}
  */
-function getCollinearWallsInDirection(dir, _grid, value){
+function getWallsInDirection(dir, _grid, collinear,  value){
     var walls = [];
     var isWall = false;
     var vertical = (dir == gridLabels.East || dir == gridLabels.West);
     var _i = vertical ? _grid.columns: _grid.rows;
     var _j = vertical ? _grid.rows:_grid.columns;
     var currentWall;
+    var last_value = -1;
     for(var i = 0; i <= _i; i++){
         for(var j = 0; j <= _j; j++){
             var cell = vertical ? getCellAt(i, j, _grid): getCellAt(j, i, _grid);
-            var isValue = value != undefined && cell.value == value ? true: (value != undefined ? false: true);
+            var isValue = value != undefined ? cell.value == value: true;
+            var isCollinear = collinear ? true: (value == undefined ? last_value == cell.value: true);
             if(!isWall && cell.label.includes(dir) && isValue){
-              isWall = true;
-              currentWall = {label: dir, direction: getDirectionFromLabel(dir), cells: []};
-              currentWall.cells.push(cell);
-            } else if(isWall && cell.label.includes(dir) && isValue){
-              currentWall.cells.push(cell);
-            } else if(isWall && (!cell.label.includes(dir) || !isValue)) {
-              isWall = false;
-              walls.push(currentWall);
+                isWall = true;
+                last_value = cell.value;
+                currentWall = {label: dir, direction: getDirectionFromLabel(dir), cells: []};
+                currentWall.cells.push(cell);
+            } else if(isWall && cell.label.includes(dir) && isValue && isCollinear){
+                currentWall.cells.push(cell);
+            } else if(isWall && (!cell.label.includes(dir) || !isValue || !isCollinear)) {
+                walls.push(currentWall);
+                if(cell.value != -1 && !isCollinear) {
+                    last_value = cell.value;
+                    currentWall = {label: dir, direction: getDirectionFromLabel(dir), cells: []};
+                    currentWall.cells.push(cell);
+                } else {
+                    isWall = false;
+                }
             }
         }
     }
     return walls;
 }
+
 
 /**
  * @param wall
@@ -1633,6 +1657,42 @@ function slideCell(cell, delta, direction, forward, _grid){
 }
 
 /**
+ * @param wall
+ * @param delta
+ * @param forward
+ * @param _grid
+ * @returns {boolean}
+ */
+function pushWall(wall, delta, _grid) {
+    for(var i = 0; i < wall.cells.length; i++)
+        if(!pushCell(wall.cells[i], delta, wall.direction, _grid))
+            return false;
+
+    updateGrid(_grid);
+    return true;
+}
+
+function pushCell(cell, delta, direction, _grid){
+    var column = cell.column;
+    var row = cell.row;
+    for(var k = 0; k < delta; k++){
+        var dx = column + direction[0]*(k+1);
+        var dy = row + direction[1]*(k+1);
+        var current_cell = getCellAt(column, row, _grid);
+        var next_cell = getCellAt(dx, dy, _grid);
+
+        if(next_cell.value != -1)
+            if(!pushCell(next_cell, delta, direction, _grid)) return false;
+
+        if(setCell(dx, dy, current_cell.value, _grid)) {
+            cell.column = dx;
+            cell.row = dy;
+        } else
+            return false;
+    }
+    return true;
+}
+/**
  * @param label
  * @returns {number[]}
  */
@@ -1646,6 +1706,28 @@ function getDirectionFromLabel(label){
     }
     return [0,0];
 }
+
+/**
+ * @param threshold
+ * @param _grid
+ */
+function snapWalls(threshold, _grid){
+    for(var i = 0; i < _grid.walls.length; i++){
+        for(var j = 0; j < _grid.walls.length; j++) {
+            var wall = _grid.walls[i];
+            if(i != j) {
+                var dist = checkWallDistance(wall, _grid.walls[j], threshold);
+                if (dist != 0) {
+                    var dist = (wall.label == gridLabels.East || wall.label == gridLabels.South) ? -dist : dist;
+                    slideWall(wall, threshold, dist > 0, _grid);
+                    i = 0;
+                    j = 0;
+                }
+            }
+        }
+    }
+}
+
 
 /**
  * @param wall
@@ -1662,7 +1744,6 @@ function snapWall(wall, threshold, _grid){
         }
     }
 }
-
 /**
  * @param wall
  * @param wall_
@@ -1714,13 +1795,19 @@ function swapRooms(_graph, _grid){
  */
 function doValidProposalMove(_graph, _grid) {
     var success = false;
-    while(!success) {
+    do {
         var copy = duplicateMatrix(_grid.matrix);
         if (MathRandom() > PROPOSAL_MOVE_PROB) {
-            var randomWall = _grid.walls[Math.floor(MathRandom() * _grid.walls.length)];
-            var randomSplittedWall = splitCollinearWall(randomWall);
-            success = slideWall(randomSplittedWall, Math.round(MathRandom() * (LIMIT - 1) + 1), MathRandom() < 0.5, _grid);
-            //if(success) snapWall(randomSplittedWall, 1, _grid);
+            if(MathRandom() > 0.5) {
+                var randomWall = _grid.walls[Math.floor(MathRandom() * _grid.walls.length)];
+                var randomSplittedWall = splitCollinearWall(randomWall);
+                success = slideWall(randomSplittedWall, Math.round(MathRandom() * (LIMIT - 1) + 1), MathRandom() < 0.5, _grid);
+            } else {
+                var randomWall = _grid.walls[Math.floor(MathRandom() * _grid.walls.length)];
+                var randomSplittedWall = splitCollinearWall(randomWall);
+                success = pushWall(randomSplittedWall, Math.round(MathRandom() * (LIMIT - 1) + 1), _grid);
+            }
+            if(success) snapWalls(1, _grid);
         } else
             success = swapRooms(_graph, _grid);
 
@@ -1736,7 +1823,7 @@ function doValidProposalMove(_graph, _grid) {
         else if (MathRandom() > PROPOSAL_MOVE_PROB && KT != 0) {
             success = moveRooms(_graph, _grid);
          */
-    }
+    } while(!success || MathRandom() < ADDITIONAL_MOVE_PROB)
 }
 
 // ****************************************
@@ -1855,7 +1942,8 @@ function getRandomColor() {
 
 function MathRandom(){
     // Divide a random UInt32 by the maximum value (2^32 -1) to get a result between 0 and 1
-    return window.crypto.getRandomValues(new Uint32Array(1))[0] / 4294967295;
+    //return window.crypto.getRandomValues(new Uint32Array(1))[0] / 4294967295;
+    return Math.random();
 }
 
 function printOutput(){
@@ -1965,10 +2053,10 @@ function download(filename, text) {
 }
 
 /**
-* @param filename
-* @param _graph
-* @param _grid
-*/
+ * @param filename
+ * @param _graph
+ * @param _grid
+ */
 function saveData(filename, _graph, _grid){
     var data_ = {
         graph_x: _graph.x,
@@ -2046,5 +2134,8 @@ function loadData(data, _viewport, _graph, _grid){
 
     resetViewport(_viewport);
     createGraphFromData(data, _graph, _viewport);
+    //var dim = getAverageSquareDimensions(_graph.areas);
+    //createGrid(_graph.columns*NODES_DISTANCE, 0, dim.width*_graph.columns*2, dim.height*_graph.rows*2, cell_width, cell_height,  _grid, _graph, _viewport);
+
     createGridFromData(data, _graph, _grid, _viewport);
 }
